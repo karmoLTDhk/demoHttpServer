@@ -13,7 +13,7 @@ def argsHandler():
                         '-p', '--port', 
                         type=int,
                         default=51830,
-                        help="HTTP Server Port, default is 51831"
+                        help="HTTP Server Port, default is 51830"
                         )
 
     return (vars(parser.parse_args()))
