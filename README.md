@@ -13,11 +13,9 @@ Execue the python for the server
 ## Network Interface:
 |Device         |IP         |Port   |URL            |Function       |
 |---            |--         |--     |--             |--             |
-|Server         |192.168.5.1|51830  |/chassisData   |HTTP Telemetry |
+|Server         |192.168.5.1|51830  |/              |HTTP Telemetry |
 |Server         |192.168.5.1|51830  |/cmd/..        |HTTP CMD       |
 |Server         |192.168.5.1|51831  |/camera        |Video Port     |
-|Server         |192.168.5.1|51832  |/camera        |Video Port     |
-|Server         |192.168.5.1|51833  |/camera        |Video Port     |
 |--             |--         |--     |--             |--             |
 |Tablet         |192.168.5.2|/      |/              |Local IP       |
 |--             |--         |--     |--             |--             |
@@ -30,57 +28,24 @@ Execue the python for the server
 ## HTTP GET CMD
 All in small-caps
 ```
-url/chassisData
+url/
 ```
 *Return 200* for Sucess executed command\
 
 ```JSON
 {
-    'radar':    [0, 0, 0, 0],
-
-    'gps':      {
-                    'year':     0,
-                    'month':    0,
-                    'day':      0,
-                    'hour':     0,
-                    'mins':     0,
-                    'sec':      0,
-                    'lat':      0,
-                    'lon':      0,
-                    'nSate':    0,
-                    'PDOP':     0,
-                    'HDOP':     0,
-                    'VDOP':     0,
-                },
-
-    'stepper':  {
-                    'mode':     0,
-                    'xPos':     0,
-                    'yPos':     0,
-                },
-
-    'chassis':  {
-                    'voltage':  0,
-                    'temp':     0,
-                    'rpmL':     0,
-                    'rpmR':     0,
-                },
-
-    'system':   {
-                    'warningLight':     0,
-                    'headlight':        0,
-                    'bumper':           0,
-                    'emergencyBtn':     0,
-                },
-
-    'fogger':   {
-                    'id':       0,
-                    'flowRate': 0,
-                    'flowSpeed':0,
-                    'warning':  0,
-                },
-
-    'imu':    [0, 0, 0]
+    json_display = {
+                    'time':                 0,
+                    'pitch':                0,      # -50 - 50 degree
+                    'roll':                 0,      # -50 - 50 degree
+                    'speed':                0,      # -10.0 - 10.0 km/h
+                    'batteryPercentage':    0,      # 0 - 100% (35.1V to 54.6V)
+                    'foggerID':             0,      # 0 / 452 / 616A
+                    'stepperX':             0,      # -90 - 90 degree
+                    'stepperY':             0,      # -45 - 45 degree
+                    'errorMsg':             [],     # A list of error
+                    'location':             (0,0),  # LAT, LON
+                }
 }
 ```
 

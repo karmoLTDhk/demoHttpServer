@@ -1,8 +1,14 @@
 #!/usr/bin/python3
 
+import os
+import os.path
+import time
 import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# For fake use
+import random
 
 def argsHandler():
     parser = argparse.ArgumentParser(
@@ -10,10 +16,17 @@ def argsHandler():
     )
 
     parser.add_argument(
+                        '-i', '--ip', 
+                        type=str,
+                        default="0.0.0.0",
+                        help="HTTP Server IP, default is 0.0.0.0"
+                        )
+
+    parser.add_argument(
                         '-p', '--port', 
                         type=int,
                         default=51830,
-                        help="HTTP Server Port, default is 51830"
+                        help="HTTP Server Port, default is 51831"
                         )
 
     return (vars(parser.parse_args()))
@@ -25,14 +38,18 @@ class httpServerHandler(BaseHTTPRequestHandler):
     board = None
 
     # JSON data set
-    json_data = {
-                    'radar':  0,
-                    'gps':    0,
-                    'stepper':0,
-                    'chassis':0,
-                    'system': 0,
-                    'fogger': 0,
-                    'imu':    0
+   
+    json_display = {
+                    'time':                 0,
+                    'pitch':                0,      # -50 - 50 degree
+                    'roll':                 0,      # -50 - 50 degree
+                    'speed':                0,      # -10.0 - 10.0 km/h
+                    'batteryPercentage':    0,      # 0 - 100% (35.1V to 54.6V)
+                    'foggerID':             0,      # 0 / 452 / 616A
+                    'stepperX':             0,      # -90 - 90 degree
+                    'stepperY':             0,      # -45 - 45 degree
+                    'errorMsg':             [],     # A list of error
+                    'location':             (0,0),  # LAT, LON
                 }
 
     _cmd_list = ["CHASSIS",
@@ -63,12 +80,12 @@ class httpServerHandler(BaseHTTPRequestHandler):
         # Root path return JSON data
         if (self.path == '/'):
             self.send_response(301)
-            self.send_header('Location', '/chassisData')
+            self.send_header('Location', '/data')
             self.end_headers()
 
-        # Chassis JSON data
-        elif (self.path == '/chassisData'):
-            self.getJsonPath()
+        # Display JSON data
+        elif (self.path == '/data'):
+            self.getDisplayPath()
         
         # Return 404 not found
         else:
@@ -78,7 +95,7 @@ class httpServerHandler(BaseHTTPRequestHandler):
         self.parsed_url = (self.path).split('/')
         if (self.parsed_url[1] == "chassisData"):
             self.getForbiddenPath("You should use GET Request")
-        elif (self.parsed_url[2] in self._cmd_list):
+        if (self.parsed_url[2] in self._cmd_list):
             if (len(self.parsed_url) < 4):
                 self.getForbiddenPath("Not enough arguments")
             else:
@@ -88,15 +105,59 @@ class httpServerHandler(BaseHTTPRequestHandler):
         else:
             self.getNotFoundPath()
 
-    def getJsonPath(self):
-        self.send_response(200)
-        self.send_header('Cache-Control', 'no-cache, private')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        data_json = json.dumps(self.json_data)
-        self.wfile.write(data_json.encode())
+    def getDisplayPath(self):
+        if (self._udpateDisplayJson()):
+            self.send_response(200)
+            self.send_header('Cache-Control', 'no-cache, private')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            data_json = json.dumps(self.json_display)
+            self.wfile.write(data_json.encode())
+        else:
+            self.getForbiddenPath("ERROR - Not updated")
 
+    def _udpateDisplayJson(self):
+        try:
+            self.json_display['time'] = int(time.time())
+            self.json_display['pitch'] = random.randint(-50, 50)
+            self.json_display['roll'] = random.randint(-50, 50)
+            self.json_display['speed'] = random.randint(-100, 100)/10
+            self.json_display['batteryPercentage'] = random.randint(0, 100)
+            self.json_display['foggerID'] = '616'
+            self.json_display['stepperX'] = random.randint(-90, 90)
+            self.json_display['stepperY'] = random.randint(-45, 45)
+            self.json_display['errorMsg'] = self.getError()
+            self.json_display['location'] = (
+                                            random.randint(22426800, 22426900)/1000000,
+                                            random.randint(114210000, 114210100)/1000000
+                                            )
+            return 1
+        except Exception as e:
+            print (e)
+
+    def getError(self):
+        error = []
+        if random.randint(0, 1):
+            error.append((1, 'Safety button depressed'))
+
+        if random.randint(0, 1):
+            error.append((1, 'Collision detected by bumper'))
+
+        voltage = random.randint(0, 100)
+        if voltage < 40:
+            error.append((1, f"Undervoltage at {voltage}, below 40"))
+
+        temp = random.randint(10, 100)
+        if temp > 50:
+            error.append((1, f"Overheating at {temp}, above 50"))
+
+        numSates = random.randint(0, 30)
+        if numSates < 8:
+            error.append((1, f"Current Satellies number is {numSates}, Position may drift"))
+
+        return error
+            
     def postCHASSISPath(self):
         if(self.parsed_url[3] == 'M'):
             if (len(self.parsed_url) >= 5):
@@ -131,21 +192,30 @@ class httpServerHandler(BaseHTTPRequestHandler):
                     else:
                         self.getForbiddenPath("Chassis - Auto Mode - Yaw Value")
                         return
+                    self.board.setMovement(self.cmd['chassisSurge'], self.cmd['chassisYaw'])
+                    self.postSucessPath()
+                    return
                 except Exception as e:
-                    self.getForbiddenPath("Chassis - Auto Mode - {}".format(e))
+                    self.getNotImplementedPath()
+                    # self.getForbiddenPath("Chassis - Auto Mode - {}".format(e))
         else:
             self.getForbiddenPath("Chassis - Action does not exist")
         
         try:
             if (self.board is not None):
-                res = True                
+                res = self.board.sendRawCmd('CHASSIS',
+                                            ord(self.cmd['chassisMode']),
+                                            self.cmd['chassisSurge'],
+                                            self.cmd['chassisYaw'],
+                                            0x00, 0x00)
+                
                 if res:
                     self.getNotImplementedPath()
                 else:
                     self.postSucessPath()
             else:
                 self.getNotImplementedPath()
-                self.wfile.write(json.dumps(self.cmd).encode())
+                # self.wfile.write(json.dumps(self.cmd).encode())
         except Exception:
             self.getNotImplementedPath()
 
@@ -153,25 +223,50 @@ class httpServerHandler(BaseHTTPRequestHandler):
         if(self.parsed_url[3] == 'M'
             or
             self.parsed_url[3] == 'R'):
+            # Input Protection
             if (len(self.parsed_url) <= 4):
                 self.getForbiddenPath("Stepper - Maunal/Reset Mode - not enough arguments")
             elif (len(self.parsed_url) >= 6):
                 self.getForbiddenPath("Stepper - Maunal/Reset Mode - Too much arguments")
             else:
                 try:
-                    self.cmd['stepperMode'] = self.parsed_url[3]
-                    if (int(self.parsed_url[4]) >= 0
-                        and
-                        int(self.parsed_url[4]) <= 15
-                        ):
-                        self.cmd['stepperSpeed'] = int(self.parsed_url[4])
-                    else:
-                        self.getForbiddenPath("Stepper - Maunal/Reset Mode - Speed shoud between 0 and 15")
+                    # Reset Action
+                    if (self.parsed_url[3] == 'R'):
+                        self.board.setStepperZero()
+                        self.board.STEPPER_CMD['speed'] = int(self.parsed_url[4])
+                        self.postSucessPath()
                         return
+                    else:
+                    # Maunal Action
+                        self.cmd['stepperMode'] = self.parsed_url[3]
+                        # Input Protection
+                        if (int(self.parsed_url[4]) >= 0
+                            and
+                            int(self.parsed_url[4]) <= 15
+                            ):
+
+                        # Set Speed
+                            self.cmd['stepperSpeed'] = int(self.parsed_url[4])
+                            self.board.STEPPER_CMD['speed'] = int(self.parsed_url[4])
+                        # Set back to full range
+                            self.board.STEPPER_CMD['xMin'] = -90
+                            self.board.STEPPER_CMD['xMax'] = 90
+                            self.board.STEPPER_CMD['yMin'] = -45
+                            self.board.STEPPER_CMD['yMax'] = 45
+                        # Execute CMD from API
+                            self.board.setStepperZero(mode = 'M')
+                            self.postSucessPath()
+                            return
+                        else:
+                            self.getForbiddenPath("Stepper - Maunal/Reset Mode - Speed shoud between 0 and 15")
+                            return
+
                 except Exception as e:
-                    self.getForbiddenPath("Stepper - Maunal/Reset Mode - {}".format(e))
+                    self.getNotImplementedPath()
+                    # self.getForbiddenPath("Stepper - Maunal/Reset Mode - {}".format(e))
 
         elif(self.parsed_url[3] == 'A'):
+            # Input Protection
             if (len(self.parsed_url) <= 8):
                 self.getForbiddenPath("Stepper - Auto Mode - not enough arguments")
             elif (len(self.parsed_url) >= 10):
@@ -220,8 +315,18 @@ class httpServerHandler(BaseHTTPRequestHandler):
                     else:
                         self.getForbiddenPath("Stepper - Auto Mode - speed value error")
                         return
+                    # Setup the Value
+                    self.board.STEPPER_CMD['xMin'] = self.cmd['stepperXmin']
+                    self.board.STEPPER_CMD['xMax'] = self.cmd['stepperXmax']
+                    self.board.STEPPER_CMD['yMin'] = self.cmd['stepperYmin']
+                    self.board.STEPPER_CMD['yMax'] = self.cmd['stepperYmax']
+                    self.board.STEPPER_CMD['speed'] =self.cmd['stepperSpeed']
+                    self.board.setStepperZero(mode = 'A')
+                    self.postSucessPath()
+                    return
                 except Exception as e:
-                    self.getForbiddenPath("Stepper - Maunal/Reset Mode - {}".format(e))
+                    self.getNotImplementedPath()
+                    # self.getForbiddenPath("Stepper - Maunal/Reset Mode - {}".format(e))
 
         elif(self.parsed_url[3] == 'S'):
             try:
@@ -257,14 +362,22 @@ class httpServerHandler(BaseHTTPRequestHandler):
                         return
                     try:
                         if (self.board is not None):
-                            res = True
+                            res = self.board.sendRawCmd('STEPPER',
+                                                        ord(self.cmd['stepperMode']),
+                                                        self.cmd['stepperXPWM'],
+                                                        0x00,
+                                                        self.cmd['stepperYPWM'],
+                                                        0x00,
+                                                        self.cmd['stepperSpeed'],
+                                                        0x00)
+                            
                             if res:
                                 self.getNotImplementedPath()
                             else:
                                 self.postSucessPath()
                         else:
                             self.getNotImplementedPath()
-                            self.wfile.write(json.dumps(self.cmd).encode())
+                            # self.wfile.write(json.dumps(self.cmd).encode())
                     except Exception:
                         self.getNotImplementedPath()
                     return
@@ -275,18 +388,6 @@ class httpServerHandler(BaseHTTPRequestHandler):
         else:
             self.getForbiddenPath("Stepper - No CMD")
 
-        try:
-            if (self.board is not None):
-                res = True
-                if res:
-                    self.getNotImplementedPath()
-                else:
-                    self.postSucessPath()
-            else:
-                self.getNotImplementedPath()
-        except Exception as e:
-            self.getNotImplementedPath()
-
     def postSYSTEMPath(self):
         if(self.parsed_url[3] == "HEADLIGHT"):
             if (len(self.parsed_url) >= 6):
@@ -294,13 +395,14 @@ class httpServerHandler(BaseHTTPRequestHandler):
             else:
                 try:
                     if (self.parsed_url[4] == "ON"):
-                        self.cmd['systemHeadlight'] = 1
+                        self.board.setHeadlightOn()
                     elif (self.parsed_url[4] == "OFF"):
-                        self.cmd['systemHeadlight'] = 0
+                        self.board.setHeadlightOff()
                     else:
                         self.getForbiddenPath("System - Headlight - Error Value, should be ON/OFF")
                 except Exception as e:
-                    self.getForbiddenPath("System - Headlight - {}".format(e))
+                    self.getNotImplementedPath()
+                    # self.getForbiddenPath("System - Headlight - {}".format(e))
 
         elif(self.parsed_url[3] == "HORN"):
             if (len(self.parsed_url) >= 6):
@@ -308,13 +410,14 @@ class httpServerHandler(BaseHTTPRequestHandler):
             else:
                 try:
                     if (self.parsed_url[4] == "ON"):
-                        self.cmd['systemHorn'] = 1
+                        self.cmd['systemHorn'] = ord('1')
                     elif (self.parsed_url[4] == "OFF"):
-                        self.cmd['systemHorn'] = 0
+                        self.cmd['systemHorn'] = ord('0')
                     else:
                         self.getForbiddenPath("System - Horn - Error Value, should be ON/OFF")
                 except Exception as e:
-                    self.getForbiddenPath("System - Horn - {}".format(e))
+                    self.getNotImplementedPath()
+                    # self.getForbiddenPath("System - Horn - {}".format(e))
             
         elif(self.parsed_url[3] == "WARNINGLIGHT"):
             if (len(self.parsed_url) >= 6):
@@ -325,7 +428,7 @@ class httpServerHandler(BaseHTTPRequestHandler):
                     if (warning_light >= 0
                         and
                         warning_light <= 6):
-                        self.cmd['systemWARNINGLIGHT'] = warning_light
+                        self.cmd['systemWARNINGLIGHT'] = ord(warning_light)
                     else:
                         print("warning light error")
                         self.getForbiddenPath("System - Warning light - Error Value, should be between 0 to 6")
@@ -337,14 +440,19 @@ class httpServerHandler(BaseHTTPRequestHandler):
 
         try:
             if (self.board is not None):
-                res = True
+                res = self.board.sendRawCmd('SYSTEMIO',
+                                            self.cmd['systemWARNINGLIGHT'],
+                                            self.cmd['systemHeadlight'],
+                                            self.cmd['systemHorn'],
+                                            0x00, 0x00)
+                
                 if res:
                     self.getNotImplementedPath()
                 else:
                     self.postSucessPath()
             else:
                 self.getNotImplementedPath()
-                self.wfile.write(json.dumps(self.cmd).encode())
+                # self.wfile.write(json.dumps(self.cmd).encode())
         except Exception:
             self.getNotImplementedPath()
 
@@ -380,14 +488,18 @@ class httpServerHandler(BaseHTTPRequestHandler):
 
         try:
             if (self.board is not None):
-                res = True
+                res = self.board.sendRawCmd('FOGGER',
+                                            self.cmd['foggerFlowRate'],
+                                            self.cmd['foggerFlowSpeed'],
+                                            0x00, 0x00)
+                
                 if res:
                     self.getNotImplementedPath()
                 else:
                     self.postSucessPath()
             else:
                 self.getNotImplementedPath()
-                self.wfile.write(json.dumps(self.cmd).encode())
+                # self.wfile.write(json.dumps(self.cmd).encode())
         except Exception:
             self.getNotImplementedPath()
 
@@ -422,19 +534,17 @@ class httpServerHandler(BaseHTTPRequestHandler):
         self.send_response(501)
         self.end_headers()
 
-def main():
-    args = argsHandler()
-    board = None
-    httpServerHandler.board = board
-    try:
-        htmlServer = ThreadingHTTPServer(
-                                ('0.0.0.0', int(args["port"])), 
-                                httpServerHandler
-                                )
-        htmlServer.serve_forever()
-
-    finally:
-        htmlServer.socket.close()
 
 if __name__ == "__main__":
-    main()
+    # from MCVPy import MCVPy
+    # os.nice(-10)
+    args = argsHandler()
+    try:
+        with ThreadingHTTPServer(
+                                (args['ip'], int(args["port"])), 
+                                httpServerHandler
+                                ) as htmlServer:
+            print(">>Server Start - {0}:{1}".format(args['ip'], int(args["port"])))
+            htmlServer.serve_forever()
+    finally:
+        pass
